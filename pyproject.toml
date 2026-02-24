@@ -1,0 +1,21 @@
+[project]
+name = "veripulse"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "cvxpy[cvxopt,mosek]>=1.8.1",
+    "hypothesis>=6.151.9",
+    "ipykernel>=7.2.0",
+    "jupyter>=1.1.1",
+    "jupyterlab>=4.5.5",
+    "matplotlib>=3.10.8",
+    "qutip>=5.2.3",
+    "qutip-qip>=0.4.1",
+]
+
+[tool.uv.workspace]
+exclude = [
+    "vendor/qutip-qtrl",
+]

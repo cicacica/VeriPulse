@@ -1,0 +1,3 @@
+[submodule "vendor/qutip-qtrl"]
+	path = vendor/qutip-qtrl
+	url = github:EzraAcalapati/qutip-qtrl.git
