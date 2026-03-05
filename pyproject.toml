@@ -15,7 +15,23 @@ dependencies = [
     "qutip-qip>=0.4.1",
 ]
 
+[tool.uv]
+package = true
+
+[tool.uv.sources]
+qutip-qtrl = { path = "vendor/qutip-qtrl", editable = true }
+
 [tool.uv.workspace]
 exclude = [
     "vendor/qutip-qtrl",
+]
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
 ]
