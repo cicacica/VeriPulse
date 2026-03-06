@@ -74,9 +74,6 @@ def nvcenter_system(K: int, cfg: PulseConfig):
     return L_drift, L_ctrl
 
 
-
-
-
 def run_grape(
     init_state,
     target_state,
@@ -99,30 +96,34 @@ def run_grape(
     L_drift, L_ctrl = nvcenter_system(1, cfg)
 
     optim_kwargs = dict(
-        num_tslots    = cfg.num_tslots,
-        evo_time      = cfg.evo_time,
-        amp_lbound    = cfg.amp_lbound,
-        amp_ubound    = cfg.amp_ubound,
-        fid_err_targ  = cfg.fid_err_targ,
-        max_iter      = cfg.max_iter,
-        max_wall_time = cfg.max_wall_time,
-        alg           = "GRAPE",
-        dyn_type      = "GEN_MAT",
-        fid_type      = "TRACEDIFF",
-        gen_stats     = True,
+        num_tslots=cfg.num_tslots,
+        evo_time=cfg.evo_time,
+        amp_lbound=cfg.amp_lbound,
+        amp_ubound=cfg.amp_ubound,
+        fid_err_targ=cfg.fid_err_targ,
+        max_iter=cfg.max_iter,
+        max_wall_time=cfg.max_wall_time,
+        alg="GRAPE",
+        dyn_type="GEN_MAT",
+        fid_type="TRACEDIFF",
+        gen_stats=True,
     )
 
     if amps is None:
         return cpo.optimize_pulse(
-            L_drift, L_ctrl,
-            init_state, target_state,
+            L_drift,
+            L_ctrl,
+            init_state,
+            target_state,
             init_pulse_type=cfg.init_pulse_type,
             **optim_kwargs,
         )
     else:
         optim = cpo.create_pulse_optimizer(
-            L_drift, L_ctrl,
-            init_state, target_state,
+            L_drift,
+            L_ctrl,
+            init_state,
+            target_state,
             **optim_kwargs,
         )
         dyn = optim.dynamics
@@ -131,14 +132,11 @@ def run_grape(
         return optim.run_optimization()
 
 
-
-
-
 def run_grape_si(
     init_state,
     target_state,
     U: Matrix,
-    lamda: float = 1e-1,
+    lam: float = 1e-1,
     config: Optional[PulseConfig] = None,
     amps: Optional[Matrix] = None,
 ):
@@ -174,7 +172,7 @@ def run_grape_si(
         alg="GRAPE",
         dyn_type="GEN_MAT",
         fid_type="SECRETIND",
-        fid_params={"U": U, "si_weight": lamda},
+        fid_params={"U": U, "si_weight": lam},
         gen_stats=True,
     )
 
