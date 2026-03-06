@@ -1,7 +1,7 @@
 [project]
 name = "veripulse"
 version = "0.1.0"
-description = "Add your description here"
+description = "Pulse engineering for secret-independent state preparation"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -23,7 +23,7 @@ package = true
 qutip-qtrl = { path = "vendor/qutip-qtrl", editable = true }
 
 [tool.uv.workspace]
-exclude = ["vendor/qutip-qtrl"]  # keep this
+exclude = ["vendor/qutip-qtrl"]  
 
 [tool.setuptools.packages.find]
 where = ["src"]
