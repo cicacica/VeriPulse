@@ -33,7 +33,6 @@ class PulseConfig:
     max_iter: int = 1000
     max_wall_time: float = 120.0
     init_pulse_type: str = "RND"
-    fid_type: str = "TRACEDIFF"
     fid_params: dict = field(default_factory=dict)
 
 
