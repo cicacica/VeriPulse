@@ -13,6 +13,7 @@ dependencies = [
     "matplotlib>=3.10.8",
     "qutip>=5.2.3",
     "qutip-qip>=0.4.1",
+    "qutip-qtrl",
 ]
 
 [tool.uv]
@@ -22,9 +23,8 @@ package = true
 qutip-qtrl = { path = "vendor/qutip-qtrl", editable = true }
 
 [tool.uv.workspace]
-exclude = [
-    "vendor/qutip-qtrl",
-]
+exclude = ["vendor/qutip-qtrl"]  # keep this
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

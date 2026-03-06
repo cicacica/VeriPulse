@@ -1873,6 +1873,28 @@ wheels = [
 ]
 
 [[package]]
+name = "qutip-qtrl"
+version = "0.2.0.dev0+a1d503a"
+source = { editable = "vendor/qutip-qtrl" }
+dependencies = [
+    { name = "numpy" },
+    { name = "packaging" },
+    { name = "qutip" },
+    { name = "scipy" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "numpy", specifier = ">=1.19" },
+    { name = "packaging" },
+    { name = "pytest", marker = "extra == 'full'", specifier = ">=5.2" },
+    { name = "pytest", marker = "extra == 'tests'", specifier = ">=5.2" },
+    { name = "qutip", specifier = ">=5.0.1" },
+    { name = "scipy", specifier = ">=1.0" },
+]
+provides-extras = ["tests", "full"]
+
+[[package]]
 name = "referencing"
 version = "0.37.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2270,6 +2292,7 @@ dependencies = [
     { name = "matplotlib" },
     { name = "qutip" },
     { name = "qutip-qip" },
+    { name = "qutip-qtrl" },
 ]
 
 [package.dev-dependencies]
@@ -2287,6 +2310,7 @@ requires-dist = [
     { name = "matplotlib", specifier = ">=3.10.8" },
     { name = "qutip", specifier = ">=5.2.3" },
     { name = "qutip-qip", specifier = ">=0.4.1" },
+    { name = "qutip-qtrl", editable = "vendor/qutip-qtrl" },
 ]
 
 [package.metadata.requires-dev]
