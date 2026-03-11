@@ -22,7 +22,7 @@ class PulseConfig:
     # Hardware
     omega_drift: float = 10e6  # Drift in rotating frame frequency (Hz)
     T2_star: float = 2e-6  # Dephasing time, a few microsec (s)
-    drive_error: float = 0.03  # Amplitude miscalibration (fraction)
+    drive_error: float = 0.03  # Amplitude miscalibration on the XY-axis (fraction)
     detuning: float = 0.0  # Normalised detuning (multiplied by omega)
     # Optimisation
     evo_time: float = 300e-9  # Total evolution time (s)
@@ -30,10 +30,11 @@ class PulseConfig:
     amp_lbound: float = -1.0
     amp_ubound: float = 1.0
     fid_err_targ: float = 1e-8
-    max_iter: int = 1000
+    max_iter: int = 500
     max_wall_time: float = 120.0
     init_pulse_type: str = "RND"
     fid_params: dict = field(default_factory=dict)
+    fid_err_scale_factor: Optional[float] = None 
 
 
 def nvcenter_system(K: int, cfg: PulseConfig):
@@ -55,10 +56,10 @@ def nvcenter_system(K: int, cfg: PulseConfig):
 
     if K == 1:
         Hc_x = 2 * pi * cfg.omega_drift * (1 + cfg.drive_error) * Sx
-        Hc_y = 2 * pi * cfg.omega_drift * Sy
+        Hc_y = 2 * pi * cfg.omega_drift * (1 + cfg.drive_error) * Sy
     else:
         Hc_x = [2 * pi * cfg.omega_drift * (1 + cfg.drive_error) * sx for sx in Sx]
-        Hc_y = [2 * pi * cfg.omega_drift * sy for sy in Sy]
+        Hc_y = [2 * pi * cfg.omega_drift * (1 + cfg.drive_error) * sy for sy in Sy]
 
     # Liouvillians
     L_drift = liouvillian(H_drift, [np.sqrt(1 / cfg.T2_star) * Sz])
@@ -71,6 +72,57 @@ def nvcenter_system(K: int, cfg: PulseConfig):
         ]
 
     return L_drift, L_ctrl
+
+
+def run_crab(
+    init_state,
+    target_state,
+    config: Optional[PulseConfig] = None,
+) -> None:
+    """
+    Run CRAB for a single-qubit system with TRACEDIFF fidelity.
+
+    Produces smooth, bandwidth-limited pulses by parameterising
+    the control as a sum of sinusoids. More realistic than GRAPE
+    for hardware-constrained systems.
+
+    Args:
+        init_state:   Vectorised initial state (single qubit).
+        target_state: Vectorised target state (single qubit).
+        config:       PulseConfig — hardware and optimisation params.
+
+    Returns:
+        qutip-ctrl OptimResult.
+    """
+    cfg = config or PulseConfig()
+
+    # max frequency = num_coeffs / evo_time
+    # e.g. 10 / 300ns ≈ 33 MHz — within typical NV hardware bandwidth
+    num_coeffs = int(cfg.num_tslots / 10)
+
+    L_drift, L_ctrl = nvcenter_system(1, cfg)
+
+    return cpo.optimize_pulse(
+        L_drift, L_ctrl,
+        init_state, target_state,
+        num_tslots              = cfg.num_tslots,
+        evo_time                = cfg.evo_time,
+        amp_lbound              = cfg.amp_lbound,
+        amp_ubound              = cfg.amp_ubound,
+        fid_err_targ            = cfg.fid_err_targ,
+        max_iter                = cfg.max_iter,
+        max_wall_time           = cfg.max_wall_time,
+        fid_err_scale_factor    = cfg.fid_err_scale_factor,
+        alg                     = "CRAB",
+        alg_params              = {"num_coeffs": num_coeffs},
+        ramping_pulse_type      = "GAUSSIAN_EDGE",
+        ramping_pulse_params    = {"sigma": 5e-9},
+        dyn_type                = "GEN_MAT",
+        fid_type                = "TRACEDIFF",
+        gen_stats               = True,
+    )
+
+
 
 
 def run_grape(
@@ -92,6 +144,7 @@ def run_grape(
         qutip-ctrl OptimResult.
     """
     cfg = config or PulseConfig()
+    
     L_drift, L_ctrl = nvcenter_system(1, cfg)
 
     optim_kwargs = dict(
@@ -102,6 +155,7 @@ def run_grape(
         fid_err_targ=cfg.fid_err_targ,
         max_iter=cfg.max_iter,
         max_wall_time=cfg.max_wall_time,
+        fid_err_scale_factor=cfg.fid_err_scale_factor,
         alg="GRAPE",
         dyn_type="GEN_MAT",
         fid_type="TRACEDIFF",
@@ -168,6 +222,7 @@ def run_grape_si(
         fid_err_targ=cfg.fid_err_targ,
         max_iter=cfg.max_iter,
         max_wall_time=cfg.max_wall_time,
+        fid_err_scale_factor=cfg.fid_err_scale_factor,
         alg="GRAPE",
         dyn_type="GEN_MAT",
         fid_type="SECRETIND",
