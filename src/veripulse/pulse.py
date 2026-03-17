@@ -2,40 +2,90 @@
 Pulse engineering related functions
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, fields, field, asdict
 from math import pi
-from typing import Optional
+from typing import Optional, Literal
 
 import numpy as np
 import qutip_qtrl.pulseoptim as cpo
-from qutip import sigmax, sigmay, sigmaz, liouvillian, tensor, basis, qeye
+from qutip import sigmax, sigmay, sigmaz, liouvillian, tensor, basis, qeye, fidelity, Qobj, operator_to_vector, vector_to_operator
+import json
+import matplotlib.pyplot as plt
+
+from .sdp import choi_optimise_secret_indep, calc_secret_indep 
 
 
 # Type aliases
 Matrix = np.ndarray
+# mode of running optimization 
+Mode = Literal["CRAB", "GRAPE", "GRAPE_AVG"]
 
+
+#-----------------------------
+# Main configuration of pulse
+#-----------------------------
 
 @dataclass
 class PulseConfig:
-    """Hardware and optimisation parameters for a GRAPE run (single or multi-qubit)."""
+    """Hardware and optimisation parameters for a GRAPE/CRAB run (single or multi-qubit)."""
 
-    # Hardware
+    # Hardware charactristics
     omega_drift: float = 10e6  # Drift in rotating frame frequency (Hz)
     T2_star: float = 2e-6  # Dephasing time, a few microsec (s)
-    drive_error: float = 0.03  # Amplitude miscalibration on the XY-axis (fraction)
+    # Hardware control error 
+    drive_error: float = 0.0  # Amplitude miscalibration on the XY-axis (fraction)
     detuning: float = 0.0  # Normalised detuning (multiplied by omega)
-    # Optimisation
-    evo_time: float = 300e-9  # Total evolution time (s)
-    num_tslots: int = 100
-    amp_lbound: float = -1.0
-    amp_ubound: float = 1.0
-    fid_err_targ: float = 1e-8
+    # Control 
+    evo_time: float = 75e-9  # ~75ns Total evolution time (s)
+    num_tslots: int = 100 # number of pulses 
+    amp_lbound: float = -1.0 # upper bound of pulse 
+    amp_ubound: float = 1.0 # lower bound of pulse
+    awg_resolution: float = 15e-12 # ~15 ps 
+    # Optimization
+    fid_err_targ: float = 1e-9
     max_iter: int = 500
-    max_wall_time: float = 120.0
+    max_wall_time: float = 120
     init_pulse_type: str = "RND"
     fid_params: dict = field(default_factory=dict)
     fid_err_scale_factor: Optional[float] = None 
 
+    # check some sensible values 
+    def __post_init__(self):
+        res = self.evo_time/self.num_tslots 
+        if res < self.awg_resolution :
+            raise ValueError(f"Resolution is too low {res:.2e}. Expected resolution is {self.awg_resolution}")
+
+    def print(self) -> None:
+        """Print config as a formatted table."""
+        descs = {
+            "omega_drift":         "(Hz) Drift/Rabi frequency",
+            "T2_star":             "(s) T2-star",
+            "drive_error":         "[0,1] Misalignment of control on the x- and y-axis",
+            "detuning":            "(coefficient) Detuning with respect to omega",
+            "evo_time":            "(s) Total evolution time",
+            "awg_resolution":      "(ps) AWG resolution",
+            "num_tslots":          "(int) Number of pulses",
+            "amp_lbound":          "(coefficient) Lower bound of pulse amplitude",
+            "amp_ubound":          "(coefficient) Upper bound of pulse amplitude",
+            "fid_err_targ":        "(float) Convergence criteria",
+            "max_iter":            "(int) Cap of iterations",
+            "max_wall_time":       "(s) Cap of compute time",
+            "init_pulse_type":     "(str) First pulse guess",
+            "fid_params":          "(dict) if any",
+            "fid_err_scale_factor":"(float) if any",
+        }
+        print(f"{'Parameter':<20} {'Value':>13}  {'Description':<30}")
+        print("─" * 75)
+        for f in fields(self):
+            val = getattr(self, f.name)
+            val_str = f"{val:.3e}" if isinstance(val, float) else str(val)
+            print(f"{f.name:<20} {val_str:>13}  {descs.get(f.name, '')}")
+        print(f"{'resolution':<20} {(self.evo_time / self.num_tslots):>13.3e}  {'(s) Current pulse resolution'}")
+        print("─" * 75)
+
+#------------------
+# Quantum system
+#-------------------
 
 def nvcenter_system(K: int, cfg: PulseConfig):
     """Build drift and control Liouvillians for K qubits."""
@@ -73,6 +123,11 @@ def nvcenter_system(K: int, cfg: PulseConfig):
 
     return L_drift, L_ctrl
 
+
+
+#----------------------
+# Pulse optimisations
+#----------------------
 
 def run_crab(
     init_state,
@@ -253,36 +308,317 @@ def run_grape_si(
         return optim.run_optimization()
 
 
-# utils
-def print_pulse_config(cfg: PulseConfig) -> None:
-    """Print PulseConfig as a formatted table."""
-    from dataclasses import fields
+#----------------------------------
+# Organising optimisation data
+#----------------------------------
 
-    print(f"{'Parameter':<20} {'Value':>15} {'Description'}")
-    print("─" * 45)
+@dataclass
+class PulseResult:
+    """
+    Stores everything from one pulseoptim run.
 
-    units = {
-        "omega_drift": "Hz",
-        "T2_star": "s",
-        "amp_error": "fraction",
-        "detuning": "normalised",
-        "evo_time": "s",
-        "num_tslots": "",
-        "amp_lbound": "",
-        "amp_ubound": "",
-        "fid_err_targ": "",
-        "max_iter": "",
-        "max_wall_time": "s",
-        "init_pulse_type": "",
-        "fid_type": "",
-        "fid_params": "",
-    }
+    Modes:
+      CRAB / GRAPE  — loop over rho_targets, results is a list of qutip results
+      GRAPE_AVG     — single packed run, result is a single qutip result
 
-    for f in fields(cfg):
-        val = getattr(cfg, f.name)
-        unit = units.get(f.name, "")
-        if isinstance(val, float):
-            val_str = f"{val:.3e}"
+    state_labels — optional metadata (angle + axis) per target state, for
+                   display and plotting. Not used to reconstruct rho_targets.
+    """
+    config: PulseConfig
+    mode: Mode
+    rho_targets: list                           # list of Qobj, always required
+    label: str = ""
+
+    # CRAB / GRAPE
+    results: Optional[list] = None              # list of qutip optim results
+
+    # GRAPE_AVG
+    result: any = None                          # single qutip optim result
+
+    # metadata — one per target state (e.g. angles, names)
+    state_labels: Optional[list] = None
+
+    # pulse — 2D (num_tslots, num_ctrls) or 3D (num_states, num_tslots, num_ctrls)
+    final_amps: Optional[np.ndarray] = None
+
+    def __post_init__(self):
+        if self.mode in ("CRAB", "GRAPE"):
+            if self.results is None:
+                raise ValueError(f"Mode '{self.mode}' requires results (list of qutip results)")
+            if len(self.results) != len(self.rho_targets):
+                raise ValueError(
+                    f"results length {len(self.results)} != "
+                    f"rho_targets length {len(self.rho_targets)}"
+                )
+        elif self.mode == "GRAPE_AVG":
+            if self.result is None:
+                raise ValueError("Mode 'GRAPE_AVG' requires result (single qutip result)")
         else:
-            val_str = str(val)
-        print(f"{f.name:<20} {val_str:>15}  {unit}")
+            raise ValueError(f"Unknown mode '{self.mode}', choose CRAB, GRAPE, or GRAPE_AVG")
+
+        if self.state_labels is not None:
+            if len(self.state_labels) != len(self.rho_targets):
+                raise ValueError(
+                    f"state_labels length {len(self.state_labels)} != "
+                    f"rho_targets length {len(self.rho_targets)}"
+                )
+
+        if self.final_amps is not None and self.final_amps.ndim not in (2, 3):
+            raise ValueError(
+                f"final_amps must be 2D (num_tslots, num_ctrls) or "
+                f"3D (num_states, num_tslots, num_ctrls), got shape {self.final_amps.shape}"
+            )
+
+    # ── Display ───────────────────────────────
+
+    def display(self):
+        self._print_header()
+        if self.results is not None or self.result is not None:
+            self._display_live()
+        else:
+            self._display_loaded()
+
+    def _display_live(self):
+        if self.mode in ("CRAB", "GRAPE"):
+            K = len(self.rho_targets)
+            err_hs_list      = [r.fid_err for r in self.results]
+            fid_compute_list = [r.stats.num_fidelity_computes for r in self.results]
+            termination_list = [r.termination_reason for r in self.results]
+            err_ul_list      = [
+                1 - fidelity(vector_to_operator(self.results[j].evo_full_final), self.rho_targets[j])
+                for j in range(K)
+            ]
+            rho_fin  = [vector_to_operator(self.results[j].evo_full_final).full() for j in range(K)]
+            rho_targ = [r.full() for r in self.rho_targets]
+        else:
+            K = len(self.rho_targets)
+            rho_fin  = extract_subspace_states(self.result, K)
+            rho_targ = [r.full() for r in self.rho_targets]
+            err_hs_list      = [self.result.fid_err]
+            fid_compute_list = [self.result.stats.num_fidelity_computes]
+            termination_list = [self.result.termination_reason]
+            err_ul_list      = [1 - fidelity(Qobj(rho_targ[j]), Qobj(rho_fin[j])) for j in range(K)]
+
+        res_choi = choi_optimise_secret_indep(rho_targ, rho_fin)
+        print(f"{'err_HS':>15} {'err_Uhlmann':>18} {'fid_compute':>13} {'termination':>25}")
+        print("─" * 75)
+        for hs, ul, fc, tr in zip(err_hs_list, err_ul_list, fid_compute_list, termination_list):
+            print(f"{hs:>15.3e} {ul:>18.3e} {fc:^15d} {tr:>25}")
+        print("─" * 75)
+        print(f"{'avg:':<4} {np.mean(err_hs_list):>15.3e} {np.mean(err_ul_list):>18.3e} {int(np.mean(fid_compute_list)):^15d}")
+        print(f"{'si:':<4} {res_choi.objective:>15.3e}")
+        print(f"{'si_lb:':<4} {calc_secret_indep(rho_targ, rho_fin):>15.3e}")
+
+    def _display_loaded(self):
+        print(f"{'err_HS':>15} {'err_Uhlmann':>18} {'fid_compute':>13} {'termination':>25}")
+        print("─" * 75)
+        for hs, ul, fc, tr in zip(
+            self.err_hs_list, self.err_ul_list,
+            self.fid_compute_list, self.termination_list
+        ):
+            print(f"{hs:>15.3e} {ul:>18.3e} {fc:^15d} {tr:>25}")
+        print("─" * 75)
+        print(f"{'avg:':<4} {np.mean(self.err_hs_list):>15.3e} {np.mean(self.err_ul_list):>18.3e} {int(np.mean(self.fid_compute_list)):^15d}")
+        if self.si is not None:
+            print(f"{'si:':<4} {self.si:>15.3e}")
+            print(f"{'si_lb:':<4} {self.si_lb:>15.3e}")
+
+
+
+    def plot_pulse(self) -> None:
+        """Plot optimized control pulses. Works both live and after load."""
+        if self.final_amps is None and (self.results is None and self.result is None):
+            raise ValueError("No pulse data available — set final_amps or provide live results")
+
+        # reconstruct time axis from config (works after load)
+        t = np.linspace(0, self.config.evo_time, self.config.num_tslots + 1)
+
+        if self.results is not None or self.result is not None:
+            self._plot_live(t)
+        else:
+            self._plot_loaded(t)
+
+    def _plot_live(self, t: np.ndarray) -> None:
+        if self.mode in ("CRAB", "GRAPE"):
+            for k, res in enumerate(self.results):
+                lbl = str(self.state_labels[k]) if self.state_labels else f"state {k}"
+                fig, ax = plt.subplots()
+                ax.set_title(f"{lbl}  fid_err={res.fid_err:.3e}")
+                ax.set_xlabel("Time (ns)")
+                ax.set_ylabel("Amplitude")
+                for i in range(res.final_amps.shape[1]):
+                    amps = np.hstack((res.final_amps[:, i], res.final_amps[-1, i]))
+                    ax.step(res.time, amps, where="post", label=f"ctrl {i}")
+                ax.legend()
+                plt.tight_layout()
+                plt.show()
+        else:
+            amps = self.result.final_amps
+            for i in range(amps.shape[1]):
+                fig, ax = plt.subplots()
+                ax.set_title(f"{self.label}  ctrl {i}  fid_err={self.result.fid_err:.3e}")
+                ax.set_xlabel("Time (ns)")
+                ax.set_ylabel("Amplitude")
+                ax.step(self.result.time[:-1], amps[:, i], where="post")
+                plt.tight_layout()
+                plt.show()
+
+    def _plot_loaded(self, t: np.ndarray) -> None:
+        amps = self.final_amps  # 2D or 3D
+        if amps.ndim == 3:
+            # (num_states, num_tslots, num_ctrls) — CRAB/GRAPE
+            for k in range(amps.shape[0]):
+                lbl = str(self.state_labels[k]) if self.state_labels else f"state {k}"
+                fig, ax = plt.subplots()
+                ax.set_title(f"{lbl}  fid_err={self.err_hs_list[k]:.3e}")
+                ax.set_xlabel("Time (ns)")
+                ax.set_ylabel("Amplitude")
+                for i in range(amps.shape[2]):
+                    a = np.hstack((amps[k, :, i], amps[k, -1, i]))
+                    ax.step(t, a, where="post", label=f"ctrl {i}")
+                ax.legend()
+                plt.tight_layout()
+                plt.show()
+        else:
+            # (num_tslots, num_ctrls) — GRAPE_AVG
+            for i in range(amps.shape[1]):
+                fig, ax = plt.subplots()
+                ax.set_title(f"{self.label}  ctrl {i}  fid_err={self.err_hs_list[0]:.3e}")
+                ax.set_xlabel("Time (ns)")
+                ax.set_ylabel("Amplitude")
+                ax.step(t[:-1], amps[:, i], where="post")
+                plt.tight_layout()
+                plt.show()
+
+    def _print_header(self):
+        print(f"\n{'═'*60}")
+        print(f"  {self.label or 'Run'}  [{self.mode}]")
+        print(f"  detuning={self.config.detuning:.3e}  drive_error={self.config.drive_error:.3e}")
+        if self.state_labels:
+            print(f"  states: {', '.join(str(s) for s in self.state_labels)}")
+        print(f"{'═'*60}")
+
+    # ── Serialization ─────────────────────────
+
+    def save(self, path: str):
+        with open(path, "w") as f:
+            json.dump(self._to_dict(), f, indent=2)
+        print(f"Saved → {path}")
+
+    @classmethod
+    def load(cls, path: str) -> "PulseResult":
+        with open(path) as f:
+            data = json.load(f)
+        return cls._from_dict(data)
+
+    # ── Numpy access (after load) ─────────────
+
+    @property
+    def rho_finals_np(self) -> list[np.ndarray]:
+        return [
+            np.array(re) + 1j * np.array(im)
+            for re, im in zip(self._rho_finals_re, self._rho_finals_im)
+        ]
+
+    @property
+    def rho_targets_np(self) -> list[np.ndarray]:
+        return [
+            np.array(re) + 1j * np.array(im)
+            for re, im in zip(self._rho_targets_re, self._rho_targets_im)
+        ]
+
+    # ── Internal helpers ──────────────────────
+
+    def _extract_matrices(self):
+        K = len(self.rho_targets)
+        rho_targ = [r.full() for r in self.rho_targets]
+        if self.mode in ("CRAB", "GRAPE"):
+            rho_fin = [vector_to_operator(self.results[j].evo_full_final).full() for j in range(K)]
+        else:
+            rho_fin = extract_subspace_states(self.result, K)
+        return rho_fin, rho_targ
+
+    def _extract_metrics(self, rho_fin, rho_targ):
+        K = len(rho_targ)
+
+        if self.mode in ("CRAB", "GRAPE"):
+            err_hs_list      = [r.fid_err for r in self.results]
+            fid_compute_list = [r.stats.num_fidelity_computes for r in self.results]
+            termination_list = [r.termination_reason for r in self.results]
+            err_ul_list      = [
+                1 - fidelity(vector_to_operator(self.results[j].evo_full_final), self.rho_targets[j])
+                for j in range(K)
+            ]
+        else:
+            err_hs_list      = [self.result.fid_err]
+            fid_compute_list = [self.result.stats.num_fidelity_computes]
+            termination_list = [self.result.termination_reason]
+            err_ul_list      = [1 - fidelity(Qobj(rho_targ[j]), Qobj(rho_fin[j])) for j in range(K)]
+
+        try:
+            solver_opts = {"verbose": False, "eps": 1e-13, "max_iters": 10000}
+            res_choi = choi_optimise_secret_indep(rho_targ, rho_fin, solver_opts=solver_opts)
+            si    = float(res_choi.objective)
+            si_lb = float(calc_secret_indep(rho_targ, rho_fin))
+        except Exception:
+            si = si_lb = None
+
+        return err_hs_list, err_ul_list, fid_compute_list, termination_list, si, si_lb
+
+    def _to_dict(self) -> dict:
+        rho_fin, rho_targ = self._extract_matrices()
+        err_hs_list, err_ul_list, fid_compute_list, termination_list, si, si_lb = \
+            self._extract_metrics(rho_fin, rho_targ)
+
+        def split(matrices):
+            return [m.real.tolist() for m in matrices], [m.imag.tolist() for m in matrices]
+
+        rho_finals_re,  rho_finals_im  = split(rho_fin)
+        rho_targets_re, rho_targets_im = split(rho_targ)
+
+        return {
+            "label":            self.label,
+            "mode":             self.mode,
+            "config":           asdict(self.config),
+            "state_labels":     self.state_labels,
+            "err_hs_list":      err_hs_list,
+            "err_ul_list":      err_ul_list,
+            "fid_compute_list": fid_compute_list,
+            "termination_list": termination_list,
+            "si":               si,
+            "si_lb":            si_lb,
+            "rho_finals_re":    rho_finals_re,
+            "rho_finals_im":    rho_finals_im,
+            "rho_targets_re":   rho_targets_re,
+            "rho_targets_im":   rho_targets_im,
+            "final_amps":       self.final_amps.tolist() if self.final_amps is not None else None,
+        }
+
+    @classmethod
+    def _from_dict(cls, d: dict) -> "PulseResult":
+        obj = object.__new__(cls)
+        obj.config      = PulseConfig(**d["config"])
+        obj.mode        = d["mode"]
+        obj.label       = d["label"]
+        obj.result      = None
+        obj.results     = None
+        obj.rho_targets = None
+        obj.state_labels = d.get("state_labels")
+        # matrices
+        obj._rho_finals_re  = d["rho_finals_re"]
+        obj._rho_finals_im  = d["rho_finals_im"]
+        obj._rho_targets_re = d["rho_targets_re"]
+        obj._rho_targets_im = d["rho_targets_im"]
+        # metrics
+        obj.err_hs_list      = d["err_hs_list"]
+        obj.err_ul_list      = d["err_ul_list"]
+        obj.fid_compute_list = d["fid_compute_list"]
+        obj.termination_list = d["termination_list"]
+        obj.si               = d.get("si")
+        obj.si_lb            = d.get("si_lb")
+        # pulse
+        amps = d.get("final_amps")
+        obj.final_amps = np.array(amps) if amps is not None else None
+        return obj
+
+

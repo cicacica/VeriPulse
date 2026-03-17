@@ -51,22 +51,26 @@ def apply_choi_cp(
 
 
 def calc_secret_indep(
-    J: Matrix, rho_targ: list[Matrix], rho_ests: list[Matrix]
+    rho_targ: list[Matrix], rho_ests: list[Matrix], J: Optional[Matrix] = None, 
 ) -> float:
     """
     Calculate secret independent manually
     """
-    # Project J onto the nearest valid Choi matrix
-    J_clean = (J + J.conj().T) / 2  # force Hermitian
-    eigvals, eigvecs = np.linalg.eigh(J_clean)
-    eigvals = np.maximum(eigvals, 0)  # force PSD
-    J_clean = eigvecs @ np.diag(eigvals) @ eigvecs.conj().T
+    if J is not None:
+        # Project J onto the nearest valid Choi matrix
+        J_clean = (J + J.conj().T) / 2  # force Hermitian
+        eigvals, eigvecs = np.linalg.eigh(J_clean)
+        eigvals = np.maximum(eigvals, 0)  # force PSD
+        J_clean = eigvecs @ np.diag(eigvals) @ eigvecs.conj().T
 
     # calcualte secret indep
     si_val = 0
     K = len(rho_targ)
     for i in range(K):
-        X = apply_choi_np(J_clean, rho_targ[i]) - rho_ests[i]
+        if J is not None : 
+            X = apply_choi_np(J_clean, rho_targ[i]) - rho_ests[i]
+        else :
+            X = rho_targ[i] - rho_ests[i]
         # force hamiltonian before eigvalsh
         X = (X + X.conj().T) / 2
         si_val += np.sum(np.abs(np.linalg.eigvalsh(X)))
