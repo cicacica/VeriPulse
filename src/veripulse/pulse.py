@@ -12,7 +12,8 @@ from qutip import sigmax, sigmay, sigmaz, liouvillian, tensor, basis, qeye, fide
 import json
 import matplotlib.pyplot as plt
 
-from .sdp import choi_optimise_secret_indep, calc_secret_indep 
+from .sdp import choi_optimise_secret_indep, calc_secret_indep
+from .gates import extract_subspace_states
 
 
 # Type aliases
@@ -378,36 +379,63 @@ class PulseResult:
         else:
             self._display_loaded()
 
+
     def _display_live(self):
+        K = len(self.rho_targets)
+        rho_targ = [r.full() for r in self.rho_targets]
+
         if self.mode in ("CRAB", "GRAPE"):
-            K = len(self.rho_targets)
             err_hs_list      = [r.fid_err for r in self.results]
             fid_compute_list = [r.stats.num_fidelity_computes for r in self.results]
             termination_list = [r.termination_reason for r in self.results]
+            rho_fin          = [vector_to_operator(self.results[j].evo_full_final).full() for j in range(K)]
             err_ul_list      = [
                 1 - fidelity(vector_to_operator(self.results[j].evo_full_final), self.rho_targets[j])
                 for j in range(K)
             ]
-            rho_fin  = [vector_to_operator(self.results[j].evo_full_final).full() for j in range(K)]
-            rho_targ = [r.full() for r in self.rho_targets]
+            self._print_table(err_hs_list, err_ul_list, fid_compute_list, termination_list)
+
         else:
-            K = len(self.rho_targets)
-            rho_fin  = extract_subspace_states(self.result, K)
-            rho_targ = [r.full() for r in self.rho_targets]
-            err_hs_list      = [self.result.fid_err]
-            fid_compute_list = [self.result.stats.num_fidelity_computes]
-            termination_list = [self.result.termination_reason]
-            err_ul_list      = [1 - fidelity(Qobj(rho_targ[j]), Qobj(rho_fin[j])) for j in range(K)]
+            # GRAPE_AVG — global metrics
+            rho_fin     = extract_subspace_states(self.result, K)
+            err_ul_list = [1 - fidelity(Qobj(rho_targ[j]), Qobj(rho_fin[j])) for j in range(K)]
+
+            # per-state HS: ||rho_fin - rho_targ||^2
+            err_hs_individual = [
+                float(np.real(np.trace((rho_fin[j] - rho_targ[j]) @ (rho_fin[j] - rho_targ[j]))))
+                for j in range(K)
+            ]
+
+            # global summary line
+            print(f"{'[global]':<10} {'err_HS':>12} {'fid_compute':>13} {'termination':>25}")
+            print("─" * 65)
+            print(f"{'':10} {self.result.fid_err:>12.3e} {self.result.stats.num_fidelity_computes:^15d} {self.result.termination_reason:>25}")
+            print()
+
+            # per-state breakdown
+            lbl_col = "state_label" if self.state_labels else "state"
+            print(f"{'[per state]':<14} {lbl_col:<18} {'err_HS':>12} {'err_Uhlmann':>13}")
+            print("─" * 60)
+            for j in range(K):
+                lbl = str(self.state_labels[j]) if self.state_labels else str(j)
+                print(f"{'':14} {lbl:<18} {err_hs_individual[j]:>12.3e} {err_ul_list[j]:>13.3e}")
+            print("─" * 60)
+            print(f"{'avg':<14} {'':18} {np.mean(err_hs_individual):>12.3e} {np.mean(err_ul_list):>13.3e}")
 
         res_choi = choi_optimise_secret_indep(rho_targ, rho_fin)
-        print(f"{'err_HS':>15} {'err_Uhlmann':>18} {'fid_compute':>13} {'termination':>25}")
-        print("─" * 75)
+        print(f"\n{'si:':<6} {res_choi.objective:>12.3e}")
+        print(f"{'si_lb:':<6} {calc_secret_indep(rho_targ, rho_fin):>12.3e}")
+
+    
+    def _print_table(self, err_hs_list, err_ul_list, fid_compute_list, termination_list):
+        print(f"{'err_HS':>15} {'err_Uhlmann':>13} {'fid_compute':>13} {'termination':>25}")
+        print("─" * 70)
         for hs, ul, fc, tr in zip(err_hs_list, err_ul_list, fid_compute_list, termination_list):
-            print(f"{hs:>15.3e} {ul:>18.3e} {fc:^15d} {tr:>25}")
-        print("─" * 75)
-        print(f"{'avg:':<4} {np.mean(err_hs_list):>15.3e} {np.mean(err_ul_list):>18.3e} {int(np.mean(fid_compute_list)):^15d}")
-        print(f"{'si:':<4} {res_choi.objective:>15.3e}")
-        print(f"{'si_lb:':<4} {calc_secret_indep(rho_targ, rho_fin):>15.3e}")
+            print(f"{hs:>15.3e} {ul:>13.3e} {fc:^15d} {tr:>25}")
+        print("─" * 70)
+        print(f"{'avg:':<4} {np.mean(err_hs_list):>15.3e} {np.mean(err_ul_list):>13.3e} {int(np.mean(fid_compute_list)):^15d}")
+
+        
 
     def _display_loaded(self):
         print(f"{'err_HS':>15} {'err_Uhlmann':>18} {'fid_compute':>13} {'termination':>25}")
@@ -427,6 +455,7 @@ class PulseResult:
 
     def plot_pulse(self) -> None:
         """Plot optimized control pulses. Works both live and after load."""
+
         if self.final_amps is None and (self.results is None and self.result is None):
             raise ValueError("No pulse data available — set final_amps or provide live results")
 
@@ -438,6 +467,7 @@ class PulseResult:
         else:
             self._plot_loaded(t)
 
+    
     def _plot_live(self, t: np.ndarray) -> None:
         if self.mode in ("CRAB", "GRAPE"):
             for k, res in enumerate(self.results):
@@ -453,15 +483,29 @@ class PulseResult:
                 plt.tight_layout()
                 plt.show()
         else:
-            amps = self.result.final_amps
-            for i in range(amps.shape[1]):
-                fig, ax = plt.subplots()
-                ax.set_title(f"{self.label}  ctrl {i}  fid_err={self.result.fid_err:.3e}")
-                ax.set_xlabel("Time (ns)")
-                ax.set_ylabel("Amplitude")
-                ax.step(self.result.time[:-1], amps[:, i], where="post")
-                plt.tight_layout()
-                plt.show()
+            self._plot_packed_live(t)
+
+
+
+    def _plot_packed_live(self, t: np.ndarray) -> None:
+        K        = len(self.rho_targets)
+        amps     = self.result.final_amps
+        t        = self.result.time[:-1]   # use actual time from result, not reconstructed
+        rho_fin  = extract_subspace_states(self.result, K)
+        rho_targ = [r.full() for r in self.rho_targets]
+        for j in range(K):
+            err_ul = 1 - fidelity(Qobj(rho_targ[j]), Qobj(rho_fin[j]))
+            lbl    = str(self.state_labels[j]) if self.state_labels else f"state {j}"
+            amps_j = amps[:, j*2 : j*2 + 2]   # (num_tslots, 2 control per qubit)
+            fig, ax = plt.subplots()
+            ax.set_title(f"{lbl}  err_Uhlmann={err_ul:.3e}")
+            ax.set_xlabel("Time (s)")
+            ax.set_ylabel("Amplitude")
+            ax.step(t, amps_j[:, 0], where="post", label="ctrl 0")
+            ax.step(t, amps_j[:, 1], where="post", label="ctrl 1")
+            ax.legend()
+            plt.tight_layout()
+            plt.show()
 
     def _plot_loaded(self, t: np.ndarray) -> None:
         amps = self.final_amps  # 2D or 3D
@@ -480,13 +524,18 @@ class PulseResult:
                 plt.tight_layout()
                 plt.show()
         else:
-            # (num_tslots, num_ctrls) — GRAPE_AVG
-            for i in range(amps.shape[1]):
+            # (num_tslots, K * 2) — GRAPE_AVG, one figure per state
+            t = np.linspace(0, self.config.evo_time, amps.shape[0])
+            for j in range(len(self.err_ul_list)):
+                lbl    = str(self.state_labels[j]) if self.state_labels else f"state {j}"
+                amps_j = amps[:, j*2 : j*2 + 2] # assume 2 controls per qubit
                 fig, ax = plt.subplots()
-                ax.set_title(f"{self.label}  ctrl {i}  fid_err={self.err_hs_list[0]:.3e}")
-                ax.set_xlabel("Time (ns)")
+                ax.set_title(f"{lbl}  err_Uhlmann={self.err_ul_list[j]:.3e}")
+                ax.set_xlabel("Time (s)")
                 ax.set_ylabel("Amplitude")
-                ax.step(t[:-1], amps[:, i], where="post")
+                ax.step(t, amps_j[:, 0], where="post", label="ctrl 0 (I)")
+                ax.step(t, amps_j[:, 1], where="post", label="ctrl 1 (Q)")
+                ax.legend()
                 plt.tight_layout()
                 plt.show()
 
