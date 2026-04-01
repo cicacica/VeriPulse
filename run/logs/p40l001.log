@@ -1,0 +1,2 @@
+/users/home/gustiani/VeriPulse/.venv/lib/python3.14/site-packages/qutip/core/data/expm.py:146: LinAlgWarning: Matrix is singular. The result might be inaccurate or the array might not have a square root.
+  return Dense(scipy.linalg.sqrtm(matrix.as_ndarray()))

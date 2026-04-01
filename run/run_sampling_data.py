@@ -3,9 +3,10 @@ from pathlib import Path
 from veripulse.pulse import run_grape_si, run_grape, run_crab, PulseConfig, PulseResult
 from veripulse.gates import rx, rhox, pack_subspace_states, extract_subspace_states, Qobj, operator_to_vector, vector_to_operator
 from numpy import pi, stack
+import time
 
 save_dir = Path.cwd().parent/"data"
-angles= [0, pi, pi/4, 5*pi/4, pi/2, 3*pi/2, 3*pi/4, 7*pi/4]
+angles= [0, pi/4, pi/2, 3*pi/4, pi, 5*pi/4, 3*pi/2, 7*pi/4]
 # initial states with a little noise 
 err = 0
 rho_init = Qobj([[1-err, 0], [0, err]])
@@ -19,6 +20,8 @@ def run_experiment(
     detuning: float,
     drive_error: float,
     identification: int,
+    lam:float,
+    verbose:bool,
 ) -> PulseResult:
 
     cfg = PulseConfig(
@@ -26,16 +29,16 @@ def run_experiment(
         detuning=detuning,
         drive_error=drive_error,
         max_iter=20000, # (int) Cap of iterations
-        max_wall_time=500000,  #(s) Cap of compute time
+        max_wall_time=100000,  #(s) Cap of compute time
+        fid_err_targ=1e-10
     )
 
-    label = f"{method}_p{num_tslots}_det{detuning:.2f}_err{drive_error:.2f}-{identification}"
-    #print(f"\nRunning: {label}")
-    #cfg.print()
-
     if method in ("CRAB", "GRAPE"):
+        label = f"{method}_p{num_tslots}_det{detuning:.2f}_err{drive_error:.2f}-{identification}"
         run_fn = run_crab if method == "CRAB" else run_grape
         results = []
+
+        s_time = time.time()
         for rho_targ in rho_targets:
             res = run_fn(
                 operator_to_vector(rho_init),
@@ -43,6 +46,7 @@ def run_experiment(
                 config=cfg,
             )
             results.append(res)
+        e_time = time.time()
         
         pr = PulseResult(
             config=cfg,
@@ -52,28 +56,33 @@ def run_experiment(
             final_amps=stack([r.final_amps for r in results]),
             state_labels=angles,
             label=label,
+            run_time=e_time - s_time
         )
 
     elif method == "GRAPE_AVG":
+        label = f"{method}_p{num_tslots}_det{detuning:.2f}_err{drive_error:.2f}-lam{lam:.3f}-{identification}"
         vRho_init, vRho_target, U_big = pack_subspace_states(
             rotations=[rx(t) for t in angles],
             rho_init=rho_init,
         )
-        result = run_grape_si(vRho_init, vRho_target, U_big, lam=400, config=cfg)
-
+        s_time = time.time()
+        result = run_grape_si(vRho_init, vRho_target, U_big, lam=lam, config=cfg)
+        e_time = time.time()
         pr = PulseResult(
             config=cfg,
             mode="GRAPE_AVG",
             result=result,
-            rho_targets=list(vRho_target),
+            rho_targets=rho_targets,
             final_amps=result.final_amps,
-            state_labels=state_labels,
             label=label,
+            state_labels=angles,
+            run_time=e_time - s_time
         )
     else:
         raise ValueError(f"Unknown method '{method}'. Choose CRAB, GRAPE, or GRAPE_AVG")
 
-    #pr.display()
+    if verbose:
+        pr.display()
 
     if save_dir is not None:
         save_dir.mkdir(parents=True, exist_ok=True)
@@ -85,13 +94,14 @@ def run_experiment(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run a pulse optimisation experiment", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("-m", "--method",     type=str,   default="GRAPE",  choices=["CRAB", "GRAPE", "GRAPE_AVG"], help="Optimisation method")
-    parser.add_argument("-p", "--num_tslots", type=int,   default=100, help="number of pulse slots")
+    parser.add_argument("-p", "--num_tslots", type=int,   default=10, help="number of pulse slots")
     parser.add_argument("-d", "--detuning",   type=float, default=0.0, help="detuning")
     parser.add_argument("-e", "--drive_error",type=float, default=0.0, help="miscalibration in control, coherent noise")
-    parser.add_argument("-i", "--identification",  type=int,  default=0, help="id for sampling")
+    parser.add_argument("-i", "--identification", type=int, default=0, help="id for sampling")
     parser.add_argument("-n", "--num_experiment", type=int, default=0, help="create in a loop for 1..n, thus executed in serial")
+    parser.add_argument("-l", "--lam", type=float, default=100, help="lambda as the proportion of the secret independent")
+    parser.add_argument("-v", "--verbose", action="store_true", help="print stuff out")
     args = parser.parse_args()
-
     if args.num_experiment > 0 :
         # do loop
         for i in range(1,args.num_experiment+1):
@@ -101,6 +111,8 @@ if __name__ == "__main__":
                 detuning=args.detuning,
                 drive_error=args.drive_error,
                 identification=i,
+                lam=args.lam,
+                verbose=args.verbose
             )
     else :     
         run_experiment(
@@ -109,4 +121,6 @@ if __name__ == "__main__":
             detuning=args.detuning,
             drive_error=args.drive_error,
             identification=args.identification,
+            lam=args.lam,
+            verbose=args.verbose
         )

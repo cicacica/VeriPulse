@@ -45,7 +45,7 @@ class PulseConfig:
     # Optimization
     fid_err_targ: float = 1e-9
     max_iter: int = 500
-    max_wall_time: float = 120
+    max_wall_time: float = 1000
     init_pulse_type: str = "RND"
     fid_params: dict = field(default_factory=dict)
     fid_err_scale_factor: Optional[float] = None 
@@ -245,7 +245,7 @@ def run_grape_si(
     init_state,
     target_state,
     U: Matrix,
-    lam: float = 1e-1,
+    lam: Optional[float] = 100,
     config: Optional[PulseConfig] = None,
     amps: Optional[Matrix] = None,
 ):
@@ -341,6 +341,9 @@ class PulseResult:
 
     # pulse — 2D (num_tslots, num_ctrls) or 3D (num_states, num_tslots, num_ctrls)
     final_amps: Optional[np.ndarray] = None
+
+    # runtime
+    run_time: Optional[float] = None
 
     def __post_init__(self):
         if self.mode in ("CRAB", "GRAPE"):
@@ -641,6 +644,7 @@ class PulseResult:
             "rho_targets_re":   rho_targets_re,
             "rho_targets_im":   rho_targets_im,
             "final_amps":       self.final_amps.tolist() if self.final_amps is not None else None,
+            "run_time":         self.run_time
         }
 
     @classmethod
@@ -668,6 +672,10 @@ class PulseResult:
         # pulse
         amps = d.get("final_amps")
         obj.final_amps = np.array(amps) if amps is not None else None
+        # stat 
+        rtime = d.get("run_time")
+        obj.run_time = rtime if rtime is not None else None
+        
         return obj
 
 
