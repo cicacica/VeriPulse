@@ -1,23 +1,16 @@
 import argparse
 from pathlib import Path
 from veripulse.pulse import run_grape_si, run_grape, run_crab, PulseConfig, PulseResult
-from veripulse.gates import rx, rhox, pack_subspace_states, extract_subspace_states, Qobj, operator_to_vector, vector_to_operator
+from veripulse.gates import rx, rhox, hadamard, hadamardZ, pack_subspace_states, extract_subspace_states, Qobj, operator_to_vector, vector_to_operator
 from numpy import pi, stack
 import time
-
-save_dir = Path.cwd().parent/"data"
-angles= [0, pi/4, pi/2, 3*pi/4, pi, 5*pi/4, 3*pi/2, 7*pi/4]
-# initial states with a little noise 
-err = 0
-rho_init = Qobj([[1-err, 0], [0, err]])
-# target states 
-rho_targets = [Qobj(rhox(a)) for a in angles]
 
 
 def run_experiment(
     method: str,
     num_tslots: int,
     detuning: float,
+    dummy:bool,
     drive_error: float,
     identification: int,
     lam:float,
@@ -32,7 +25,27 @@ def run_experiment(
         max_wall_time=100000,  #(s) Cap of compute time
         fid_err_targ=1e-10
     )
-
+    
+    # dummyless
+   
+    angles= [0, pi/4, pi/2, 3*pi/4, pi, 5*pi/4, 3*pi/2, 7*pi/4]
+    err = 0 # initial states with a little noise 
+    rho_init = Qobj([[1-err, 0], [0, err]])
+    rho_targets = [Qobj(rhox(a)) for a in angles]
+    unitary_rotations=[rx(t) for t in angles]
+    
+    # with dummy 
+    if dummy == True : 
+        save_dir = Path.cwd().parent/"data/dummyyes"
+        angles.append("+")
+        angles.append("-")
+        rho_targets.append(Qobj([[0.5, 0.5],[0.5, 0.5]])) # |+>
+        rho_targets.append(Qobj([[0.5, -0.5],[-0.5, 0.5]])) # |->
+        unitary_rotations.append(hadamard())
+        unitary_rotations.append(hadamardZ())
+    else: 
+        save_dir = Path.cwd().parent/"data/dummyless" 
+ 
     if method in ("CRAB", "GRAPE"):
         label = f"{method}_p{num_tslots}_det{detuning:.2f}_err{drive_error:.2f}-{identification}"
         run_fn = run_crab if method == "CRAB" else run_grape
@@ -60,9 +73,10 @@ def run_experiment(
         )
 
     elif method == "GRAPE_AVG":
-        label = f"{method}_p{num_tslots}_det{detuning:.2f}_err{drive_error:.2f}-lam{lam:.3f}-{identification}"
+        # also add ratio
+        label = f"{method}_p{num_tslots}_det{detuning:.2f}_err{drive_error:.2f}-lam{lam:.4f}-{identification}"
         vRho_init, vRho_target, U_big = pack_subspace_states(
-            rotations=[rx(t) for t in angles],
+            rotations=unitary_rotations,
             rho_init=rho_init,
         )
         s_time = time.time()
@@ -95,13 +109,16 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run a pulse optimisation experiment", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("-m", "--method",     type=str,   default="GRAPE",  choices=["CRAB", "GRAPE", "GRAPE_AVG"], help="Optimisation method")
     parser.add_argument("-p", "--num_tslots", type=int,   default=10, help="number of pulse slots")
-    parser.add_argument("-d", "--detuning",   type=float, default=0.0, help="detuning")
+    parser.add_argument("-det", "--detuning",   type=float, default=0.0, help="detuning")
+    parser.add_argument("-dum", "--dummy",   type=bool, default=False, help="with dummy qubits")
     parser.add_argument("-e", "--drive_error",type=float, default=0.0, help="miscalibration in control, coherent noise")
     parser.add_argument("-i", "--identification", type=int, default=0, help="id for sampling")
     parser.add_argument("-n", "--num_experiment", type=int, default=0, help="create in a loop for 1..n, thus executed in serial")
     parser.add_argument("-l", "--lam", type=float, default=100, help="lambda as the proportion of the secret independent")
     parser.add_argument("-v", "--verbose", action="store_true", help="print stuff out")
     args = parser.parse_args()
+
+    
     if args.num_experiment > 0 :
         # do loop
         for i in range(1,args.num_experiment+1):
@@ -109,6 +126,7 @@ if __name__ == "__main__":
                 method=args.method,
                 num_tslots=args.num_tslots,
                 detuning=args.detuning,
+                dummy=args.dummy,
                 drive_error=args.drive_error,
                 identification=i,
                 lam=args.lam,
@@ -119,6 +137,7 @@ if __name__ == "__main__":
             method=args.method,
             num_tslots=args.num_tslots,
             detuning=args.detuning,
+            dummy=args.dummy,
             drive_error=args.drive_error,
             identification=args.identification,
             lam=args.lam,

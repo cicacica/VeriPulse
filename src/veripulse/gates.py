@@ -16,7 +16,7 @@ def rz(theta: float) -> Matrix:
     Rotation around Z: Exp[-i theta/2 Z].
     State preparation in the XY-plane can be obtained by application of  rz(theta)|+>
     """
-    return np.array([[1, 0], [0, exp(1j * theta)]])
+    return np.array([[1, 0], [0, exp(1j * theta)]], dtype=complex)
 
 
 def rx(theta: float) -> Matrix:
@@ -28,7 +28,7 @@ def rx(theta: float) -> Matrix:
         [
             [cos(theta / 2), -1j * sin(theta / 2)],
             [-1j * sin(theta / 2), cos(theta / 2)],
-        ]
+        ], dtype=complex
     )
 
 
@@ -40,7 +40,7 @@ def rhox(theta: float) -> Matrix:
         [
             [cos(theta / 2) ** 2, 1j * 0.5 * sin(theta)],
             [-1j * 0.5 * sin(theta), sin(theta / 2) ** 2],
-        ]
+        ], dtype=complex
     )
 
 
@@ -48,7 +48,22 @@ def rhoz(theta: float) -> Matrix:
     """
     Returns rho_theta: |theta><theta|  as the prepared state for XY blind quantum computing
     """
-    return np.array([[0.5, 0.5 * exp(-1j * theta)], [0.5 * exp(1j * theta), 0.5]])
+    return np.array([[0.5, 0.5 * exp(-1j * theta)], [0.5 * exp(1j * theta), 0.5]], dtype=complex)
+
+
+def hadamard() -> Matrix : 
+    """
+    Returns H matrix operation 
+    """
+    return np.array([[1/np.sqrt(2), 1/np.sqrt(2)], [1/np.sqrt(2), -1/np.sqrt(2)]], dtype=complex)
+
+
+def hadamardZ() -> Matrix : 
+    """
+    Returns -- H -- Z -- matrix operation 
+    """
+    return np.array([[1/np.sqrt(2), 1/np.sqrt(2)], [-1/np.sqrt(2), 1/np.sqrt(2)]], dtype=complex)
+
 
 
 def direct_sum(unitaries: list[Matrix]) -> Matrix:
