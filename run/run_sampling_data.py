@@ -110,7 +110,7 @@ if __name__ == "__main__":
     parser.add_argument("-m", "--method",     type=str,   default="GRAPE",  choices=["CRAB", "GRAPE", "GRAPE_AVG"], help="Optimisation method")
     parser.add_argument("-p", "--num_tslots", type=int,   default=10, help="number of pulse slots")
     parser.add_argument("-det", "--detuning",   type=float, default=0.0, help="detuning")
-    parser.add_argument("-dum", "--dummy",   type=bool, default=False, help="with dummy qubits")
+    parser.add_argument("-dum", "--dummy", action="store_true", default=False, help="with dummy qubits")
     parser.add_argument("-e", "--drive_error",type=float, default=0.0, help="miscalibration in control, coherent noise")
     parser.add_argument("-i", "--identification", type=int, default=0, help="id for sampling")
     parser.add_argument("-n", "--num_experiment", type=int, default=0, help="create in a loop for 1..n, thus executed in serial")
