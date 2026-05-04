@@ -29,7 +29,7 @@ def test_sdp():
     print("estimate secret independence by testing SDP from tomography result ... ")
     # tomography result
     rho_ests = []
-    with open("data/rhoEsti1.json") as f:
+    with open("data/dummyless/rhoEsti1.json") as f:
         experiment_tomography = json.load(f)
     for d in experiment_tomography:
         raw = np.array(list(d.values())[0])  # shape should be (2,2,2)
@@ -53,7 +53,7 @@ def test_sdp():
     print("objective value:", res.objective)
 
     print("Manually calculating the resulting Choi matrix ... ")
-    si = calc_secret_indep(res.choi, rho_targs, rho_ests)
+    si = calc_secret_indep(rho_targs, rho_ests,res.choi)
     si_diff = res.objective - si
     print("si_opt - si_manual = ", si_diff)
     assert si_diff < 1e-8, "Resulting Choi might not be optimal"
