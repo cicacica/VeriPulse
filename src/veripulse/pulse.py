@@ -244,14 +244,14 @@ def run_grape(
 def lam_from_ratio(ratio, n=1):
     """
     Return lambda given the desired ratio of fSI influence over fHS.
-        f = 0.5 * n^-3 * fHS + lam * fSI
+        f = 1/8 * n^-2 * fHS + lam * fSI
         ratio = lam / coeff_hs = 2 * lam * n^3
 
     n=1    -> GRAPE
     n=8,10 -> GRAPE AVG
     """
-    coeff_hs = 0.5 / (n ** 3)
-    lam = ratio * coeff_hs  # = ratio / (2 * n^3)
+    coeff_hs = 0.125 / (n ** 2)
+    lam = ratio * coeff_hs  
     return lam
 
 
@@ -264,7 +264,7 @@ def ratio_from_lam(lam, n=1):
     Returns ratio x, which means f_si is x times more influental than the fidelity.
     Thus, ratio >> 1 means si first, then fidelity
     """
-    c_hs = 0.5/(n**3)
+    c_hs = 0.125/(n**2)
     c_si = lam
     ratio = c_si / c_hs
     return ratio
