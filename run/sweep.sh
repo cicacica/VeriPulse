@@ -10,5 +10,6 @@ export PATH="$HOME/.local/bin:$PATH"
 cd "$(dirname "$0")"
 
 DET="$1"
+ERR="$2"
 
-uv run python -u run_sampling_data.py -p 40 -m GRAPE_AVG -l 0.05 -n 5 -det $DET
+uv run python -u run_sampling_data.py -p 40 -m GRAPE -l 0.05 -n 5 -det $DET -e $ERR

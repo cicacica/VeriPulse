@@ -24,6 +24,7 @@ vendor/*/.venv/
 .pytest_cache/
 .coverage
 htmlcov/
+logs
 
 # Editors
 .vscode/
