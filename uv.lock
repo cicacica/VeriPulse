@@ -1874,7 +1874,7 @@ wheels = [
 
 [[package]]
 name = "qutip-qtrl"
-version = "0.2.0.dev0+f16b1ee"
+version = "0.2.0.dev0+a1d503a"
 source = { editable = "vendor/qutip-qtrl" }
 dependencies = [
     { name = "numpy" },
