@@ -336,6 +336,16 @@ def run_grape_si(
         dyn = optim.dynamics
         dyn.init_timeslots()
         dyn.initialize_controls(amps)
+
+        # debug: verify amps loaded and SI before optimization
+        #print(f"[grape_si] ctrl_amps[0, :4]   = {dyn.ctrl_amps[0, :4]}")
+        #print(f"[grape_si] expected amps[0,:4] = {amps[0, :4]}")
+        #print(f"[grape_si] amps match          : {np.allclose(dyn.ctrl_amps, amps)}")
+        fid_comp = dyn.fid_computer
+        fid_comp.flag_system_changed()
+        dyn.compute_evolution()
+        #print(f"[grape_si] initial fid_err     = {fid_comp.get_fid_err():.3e}")
+
         return optim.run_optimization()
 
 
