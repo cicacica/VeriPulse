@@ -6,10 +6,10 @@ cd "$(dirname "$0")"
 # det 0.01, 0.05, 0.10, 0.20
 # err 0.05, 0.1
 #
-# Core 3x3 grid: GRAPE
+# Core 3x3 grid: CRAB/GRAPE
 for D in 0.0 0.05 0.10 0.2; do
-  for err in 0.0 0.05 0.10; do
-    oarsub -l /nodes=1/core=24,walltime=48:0:0 -p "host like 'big%'" \
+  for err in 0.0 0.05 0.1; do
+    oarsub -l /nodes=1/core=24,walltime=150:0:0 -p "host like 'small%'" \
            "$(pwd)/sweep.sh $D $err"
   done
 done
@@ -17,3 +17,9 @@ done
 # Stress test
 #oarsub -l /nodes=1/core=48,walltime=24:0:0 -p "host like 'big%'" \
 #       "$(pwd)/sweep.sh 0.20 0.0"
+#
+
+#for rid in 1 2 3 4 5; do
+#    oarsub -l /nodes=1/core=64,walltime=24:0:0 -p "host like 'tall%'" \
+#           "$(pwd)/sweep.sh $rid"
+#done
