@@ -1,138 +1,61 @@
 """
-warm_start_inspect.py
----------------------
-Notebook-friendly helper: finds the best GRAPE run matching given parameters
-and returns its amps + full metadata, ready to inspect before passing into
-run_grape_si.
+run_warm_start.py
+-----------------
+Warm-start GRAPE_AVG from existing GRAPE or CRAB runs.
+Can be used as a script (CLI) or imported in a notebook.
 
-Two workflows
--------------
-# 1. Auto: let the function pick the best file
-ws = find_best_grape_run(
-    data_dir    = "data/dummyless/",
-    num_tslots  = 40,
-    detuning    = 0.0,
-    drive_error = 0.0,
-    rank_by     = "si",
-)
+Notebook usage
+--------------
+    from run_warm_start import repack_amps, run_with_warm_start
+    from veripulse.warm_start_inspect import find_best_grape_run, load_grape_run
 
-# 2. Manual: inspect the table, then load a specific file by name
-ws = load_grape_run("data/dummyless/GRAPE_p40_det0.00_err0.00-3.json")
+    ws  = find_best_grape_run(data_dir, num_tslots=40, detuning=0.0,
+                              drive_error=0.0, rank_by="si")
+    # or:
+    ws  = load_grape_run("data/dummyless/GRAPE_p40_det0.00_err0.00-3.json")
 
-print(ws)
-ws.plot_amps()
+    res = run_with_warm_start(ws, angles, vRho_init, vRho_target,
+                              U=U_big, lam=0.05)
+
+    # with config overrides:
+    res = run_with_warm_start(ws, angles, vRho_init, vRho_target,
+                              U=U_big, lam=0.05,
+                              max_iter=2000, fid_err_targ=1e-12)
+
+Script usage (same style as run_sampling_data.py)
+-------------------------------------------------
+    # single run
+    python run_warm_start.py -s GRAPE -p 40 -det 0.0 -e 0.0 -i 1 -l 0.05 -v
+
+    # loop over n samples
+    python run_warm_start.py -s GRAPE -p 40 -det 0.0 -e 0.0 -n 5 -l 0.05
+
+    # with dummy qubits
+    python run_warm_start.py -s CRAB -p 40 -det 0.0 -e 0.0 -n 5 -l 0.05 -dum
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import math
 import re
-from dataclasses import dataclass, field
+import time
 from pathlib import Path
-from typing import Any, Literal, Optional
 
 import numpy as np
+from numpy import pi
+from qutip import Qobj, operator_to_vector
+
+from veripulse.warm_start_inspect import WarmStartResult, find_best_grape_run, load_grape_run
+from veripulse.gates import rx, rhox, hadamard, hadamardZ, pack_subspace_states
+from veripulse.pulse import PulseConfig, PulseResult, run_grape_si
 
 
-# ── float comparison ─────────────────────────────────────────────────────────
+# ── float comparison ──────────────────────────────────────────────────────────
 
 def _feq(a: float, b: float, tol: float = 1e-9) -> bool:
-    """Absolute-tolerance float equality. Safe against .2f rounding traps."""
     return math.isclose(a, b, rel_tol=0.0, abs_tol=tol)
-
-
-# ── ranking metric extractor ─────────────────────────────────────────────────
-
-RankBy = Literal["si", "err_ul_mean", "err_ul_median"]
-
-def _compute_scores(data: dict) -> dict[str, Optional[float]]:
-    si_val = data.get("si")
-    si = float(si_val) if si_val is not None else None
-
-    raw = data.get("err_ul_list")
-    if raw and len(raw) > 0:
-        arr = np.array(raw, dtype=float)
-        ul_mean   = float(np.mean(arr))
-        ul_median = float(np.median(arr))
-    else:
-        ul_mean = ul_median = None
-
-    return {"si": si, "err_ul_mean": ul_mean, "err_ul_median": ul_median}
-
-
-# ── result container ──────────────────────────────────────────────────────────
-
-@dataclass
-class WarmStartResult:
-    amps:          np.ndarray
-    rank_by:       str
-    rank_value:    float
-    si:            Optional[float]
-    err_ul_list:   Optional[list]
-    err_ul_mean:   Optional[float]
-    err_ul_median: Optional[float]
-    path:          Path
-    method:        str
-    num_tslots:    int
-    detuning:      float
-    drive_error:   float
-    lam:           Optional[float]
-    config:        dict[str, Any] = field(default_factory=dict)
-    raw:           dict[str, Any] = field(default_factory=dict)
-
-    def __repr__(self) -> str:
-        def fmt(v): return f"{v:.3e}" if v is not None else "n/a"
-        lines = [
-            "WarmStartResult",
-            f"  source        : {self.path.name}",
-            f"  method        : {self.method}",
-            f"  tslots        : {self.num_tslots}",
-            f"  detuning      : {self.detuning}",
-            f"  drive_error   : {self.drive_error}",
-            f"  lam           : {self.lam}",
-            f"  ── metrics ──────────────────────",
-            f"  si            : {fmt(self.si)}",
-            f"  err_ul_mean   : {fmt(self.err_ul_mean)}",
-            f"  err_ul_median : {fmt(self.err_ul_median)}",
-        ]
-        if self.err_ul_list is not None:
-            per = "  ".join(f"{v:.3e}" for v in self.err_ul_list)
-            lines.append(f"  err_ul_list   : [{per}]")
-        lines += [
-            f"  ── selected by '{self.rank_by}' = {fmt(self.rank_value)} ──",
-            f"  amps          : shape {self.amps.shape}"
-                              f"  min={self.amps.min():.3f}"
-                              f"  max={self.amps.max():.3f}",
-        ]
-        if self.config:
-            lines.append(f"  config        : {self.config}")
-        return "\n".join(lines)
-
-    def plot_amps(self, evo_time: Optional[float] = None) -> None:
-        try:
-            import matplotlib.pyplot as plt
-        except ImportError:
-            print("matplotlib not available — skipping plot.")
-            return
-
-        t_total = evo_time or self.config.get("evo_time") or self.raw.get("evo_time") or 1.0
-        t = np.linspace(0, t_total, self.amps.shape[0])
-        si_str  = f"{self.si:.3e}" if self.si is not None else "n/a"
-        ulm_str = f"{self.err_ul_mean:.3e}" if self.err_ul_mean is not None else "n/a"
-
-        fig, ax = plt.subplots(figsize=(8, 3))
-        for i in range(self.amps.shape[1]):
-            ax.step(t, self.amps[:, i], where="post", label=f"ctrl {i}")
-        ax.set_xlabel("Time (s)" if t_total != 1.0 else "Time slot")
-        ax.set_ylabel("Amplitude")
-        ax.set_title(
-            f"Warm-start pulse  [{self.path.name}]\n"
-            f"si={si_str}   err_ul_mean={ulm_str}   (ranked by '{self.rank_by}')"
-        )
-        ax.legend()
-        plt.tight_layout()
-        plt.show()
 
 
 # ── filename parser ───────────────────────────────────────────────────────────
@@ -142,10 +65,10 @@ _FNAME_RE = re.compile(
     r"_det(?P<det>[\d.]+)"
     r"_err(?P<err>[\d.]+)"
     r"(?:_lam(?P<lam>[\d.]+))?"
-    r"(?:-(?P<id>.+))?$"
+    r"-(?P<id>.+)$"
 )
 
-def _parse_stem(stem: str) -> Optional[dict]:
+def _parse_stem(stem: str):
     m = _FNAME_RE.match(stem)
     if m is None:
         return None
@@ -156,105 +79,27 @@ def _parse_stem(stem: str) -> Optional[dict]:
         "detuning":    float(m.group("det")),
         "drive_error": float(m.group("err")),
         "lam":         float(lam_str) if lam_str is not None else None,
+        "id":          m.group("id"),
     }
 
 
-def _build_result(path: Path, data: dict, scores: dict,
-                  meta: dict, rank_by: str, rank_score: float) -> Optional[WarmStartResult]:
-    raw_amps = data.get("final_amps")
-    if raw_amps is None:
-        return None
-    amps = np.array(raw_amps, dtype=float)
-    return WarmStartResult(
-        amps          = amps,
-        rank_by       = rank_by,
-        rank_value    = rank_score,
-        si            = scores["si"],
-        err_ul_list   = data.get("err_ul_list"),
-        err_ul_mean   = scores["err_ul_mean"],
-        err_ul_median = scores["err_ul_median"],
-        path          = path,
-        method        = meta["method"],
-        num_tslots    = meta["num_tslots"],
-        detuning      = meta["detuning"],
-        drive_error   = meta["drive_error"],
-        lam           = meta["lam"],
-        config        = data.get("config", {}),
-        raw           = data,
-    )
+# ── find source runs ──────────────────────────────────────────────────────────
 
-
-# ── load by explicit path ─────────────────────────────────────────────────────
-
-def load_grape_run(path: str | Path, rank_by: RankBy = "si") -> Optional[WarmStartResult]:
-    """
-    Load a WarmStartResult from an explicit JSON file path.
-
-    Use this after inspecting the verbose table from find_best_grape_run
-    and deciding which file you want to use manually.
-
-    Parameters
-    ----------
-    path    : path to the JSON file
-    rank_by : which metric to report as rank_value (default "si")
-    """
-    path = Path(path)
-    meta = _parse_stem(path.stem)
-    if meta is None:
-        raise ValueError(f"Cannot parse filename: {path.name}")
-
-    with open(path) as f:
-        data = json.load(f)
-
-    scores     = _compute_scores(data)
-    rank_score = scores.get(rank_by) or 0.0
-
-    result = _build_result(path, data, scores, meta, rank_by, rank_score)
-    if result is None:
-        raise ValueError(f"No final_amps found in {path.name}")
-
-    print(f"[load_grape_run] loaded: {path.name}")
-    print(f"  si            : {scores['si']:.3e}" if scores['si'] else "  si: n/a")
-    print(f"  err_ul_mean   : {scores['err_ul_mean']:.3e}" if scores['err_ul_mean'] else "  err_ul_mean: n/a")
-    print(f"  amps shape    : {result.amps.shape}")
-    return result
-
-
-# ── auto search ───────────────────────────────────────────────────────────────
-
-def find_best_grape_run(
-    data_dir:    str | Path,
+def find_source_runs(
+    data_dir:    Path,
+    source:      str,
     num_tslots:  int,
     detuning:    float,
     drive_error: float,
-    *,
-    rank_by:     RankBy = "si",
-    verbose:     bool   = True,
-) -> Optional[WarmStartResult]:
-    """
-    Scan data_dir for plain GRAPE runs matching parameters, print a ranked
-    table, and return the best as a WarmStartResult.
-
-    To pick a specific file instead of the best, copy the filename from the
-    table and use load_grape_run("data/.../<filename>.json").
-
-    Parameters
-    ----------
-    data_dir    : directory containing *.json result files
-    num_tslots  : must match exactly
-    detuning    : matched with abs tolerance 1e-9
-    drive_error : same tolerance
-    rank_by     : "si" | "err_ul_mean" | "err_ul_median"
-    verbose     : print ranked table
-    """
-    data_dir = Path(data_dir)
-    candidates = []
-
+    n:           int = 0,
+) -> list[tuple[str, dict, dict]]:
+    """Return list of (id, meta, data) for matching source runs, sorted by id."""
+    results = []
     for path in sorted(data_dir.glob("*.json")):
         meta = _parse_stem(path.stem)
         if meta is None:
             continue
-        if meta["method"] != "GRAPE":
+        if meta["method"] != source:
             continue
         if meta["lam"] is not None:
             continue
@@ -264,64 +109,265 @@ def find_best_grape_run(
             continue
         if not _feq(meta["drive_error"], drive_error):
             continue
-
         try:
             with open(path) as f:
                 data = json.load(f)
         except Exception:
             continue
-
-        scores     = _compute_scores(data)
-        rank_score = scores[rank_by]
-        if rank_score is None:
-            if verbose:
-                print(f"  [skip] {path.name} — '{rank_by}' not found in JSON")
+        if data.get("final_amps") is None:
             continue
+        results.append((meta["id"], meta, data))
 
-        candidates.append((rank_score, scores, path, meta, data))
+    if n > 0:
+        results = results[:n]
+    return results
 
-    if not candidates:
-        if verbose:
-            print(
-                f"[find_best_grape_run] No matching GRAPE runs in '{data_dir}'\n"
-                f"  (tslots={num_tslots}, detuning={detuning}, "
-                f"drive_error={drive_error}, rank_by='{rank_by}')"
-            )
-        return None
 
-    candidates.sort(key=lambda x: x[0])
+# ── repack ────────────────────────────────────────────────────────────────────
 
-    if verbose:
-        def fmt(v): return f"{v:.3e}" if v is not None else "  n/a  "
-        header = f"{'file':<45}  {'si':>9}  {'ul_mean':>9}  {'ul_median':>9}  {'rank':>9}"
-        print(
-            f"\n[find_best_grape_run] {len(candidates)} candidate(s) "
-            f"(tslots={num_tslots}, det={detuning}, err={drive_error}, "
-            f"rank_by='{rank_by}'):"
+def repack_amps(ws: WarmStartResult, angles: list) -> np.ndarray:
+    """
+    Repack (K, num_tslots, 2) GRAPE/CRAB amps into (num_tslots, K*2) joint format.
+
+    Sorts amps to match the angle order passed to pack_subspace_states.
+    L_ctrl order in nvcenter_system is grouped: [Lx_0,...,Lx_K, Ly_0,...,Ly_K]
+    """
+    amps   = ws.amps
+    thetas = np.array(ws.raw["state_labels"])
+    angles = np.array(angles)
+
+    sort_idx    = [np.argmin(np.abs(thetas - a)) for a in angles]
+    amps_sorted = amps[sort_idx]
+
+    amps_x     = amps_sorted[:, :, 0].T
+    amps_y     = amps_sorted[:, :, 1].T
+    amps_joint = np.hstack([amps_x, amps_y])
+
+    print(f"[repack] sorted labels : {[f'{thetas[i]:.4f}' for i in sort_idx]}")
+    print(f"[repack] amps_joint    : {amps_joint.shape}")
+    return amps_joint
+
+
+def _repack_from_data(raw_amps, json_state_labels, numeric_angles) -> np.ndarray:
+    """Repack directly from raw JSON data (used in CLI batch mode)."""
+    amps   = np.array(raw_amps)
+    thetas = np.array(json_state_labels)
+    angles = np.array(numeric_angles)
+
+    sort_idx    = [np.argmin(np.abs(thetas - a)) for a in angles]
+    amps_sorted = amps[sort_idx]
+
+    amps_x = amps_sorted[:, :, 0].T
+    amps_y = amps_sorted[:, :, 1].T
+    return np.hstack([amps_x, amps_y])
+
+
+# ── notebook API ──────────────────────────────────────────────────────────────
+
+def run_with_warm_start(
+    ws: WarmStartResult,
+    angles: list,
+    init_state,
+    target_state,
+    U,
+    lam: float,
+    **config_overrides,
+):
+    """
+    Run run_grape_si using config and amps from a WarmStartResult.
+
+    Parameters
+    ----------
+    ws               : WarmStartResult from find_best_grape_run() or load_grape_run()
+    angles           : sorted numeric angles passed to pack_subspace_states
+    init_state       : vectorised initial state (from pack_subspace_states)
+    target_state     : vectorised target state
+    U                : block-diagonal unitary
+    lam              : secret-independence weight
+    **config_overrides : any PulseConfig field to override, e.g.
+                         max_iter=2000, max_wall_time=3600, fid_err_targ=1e-12
+    """
+    cfg_dict = dict(ws.config)
+    cfg_dict.update(config_overrides)
+    cfg = PulseConfig(**cfg_dict)
+
+    if config_overrides:
+        print(f"[warm start] config overrides : {config_overrides}")
+
+    amps_joint = repack_amps(ws, angles)
+
+    print(f"[warm start] amps from     : {ws.path.name}")
+    print(f"[warm start] si            : {ws.si:.3e}")
+    print(f"[warm start] max_iter      : {cfg.max_iter}")
+    print(f"[warm start] max_wall_time : {cfg.max_wall_time}")
+    print(f"[warm start] fid_err_targ  : {cfg.fid_err_targ}")
+
+    return run_grape_si(
+        init_state, target_state,
+        U=U, lam=lam,
+        config=cfg,
+        amps=amps_joint,
+    )
+
+
+# ── CLI batch mode ────────────────────────────────────────────────────────────
+
+def run_experiment(
+    source:         str,
+    num_tslots:     int,
+    detuning:       float,
+    dummy:          bool,
+    drive_error:    float,
+    identification: int,
+    lam:            float,
+    verbose:        bool,
+) -> PulseResult:
+    """Single experiment run (mirrors run_sampling_data.py style)."""
+
+    # system setup
+    angles            = [0, pi/4, pi/2, 3*pi/4, pi, 5*pi/4, 3*pi/2, 7*pi/4]
+    err               = 0
+    rho_init          = Qobj([[1-err, 0], [0, err]])
+    rho_targets       = [Qobj(rhox(a)) for a in angles]
+    unitary_rotations = [rx(t) for t in angles]
+
+    if dummy:
+        save_dir = Path.cwd().parent / "data/dummyyes"
+        angles            = angles + ["+", "-"]
+        rho_targets       = rho_targets + [
+            Qobj([[0.5,  0.5], [ 0.5, 0.5]]),
+            Qobj([[0.5, -0.5], [-0.5, 0.5]]),
+        ]
+        unitary_rotations = unitary_rotations + [hadamard(), hadamardZ()]
+    else:
+        save_dir = Path.cwd().parent / "data/dummyless"
+
+    cfg = PulseConfig(
+        num_tslots    = num_tslots,
+        detuning      = detuning,
+        drive_error   = drive_error,
+        max_iter      = 20000,
+        max_wall_time = 100000,
+        fid_err_targ  = 1e-10,
+    )
+
+    # find specific source run by id
+    all_runs    = find_source_runs(save_dir, source, num_tslots, detuning, drive_error)
+    source_run  = next(
+        ((rid, meta, data) for rid, meta, data in all_runs
+         if str(rid) == str(identification)),
+        None
+    )
+    if source_run is None:
+        raise FileNotFoundError(
+            f"No {source} run with id={identification} found in '{save_dir}' "
+            f"(tslots={num_tslots}, det={detuning}, err={drive_error})"
         )
-        print("  " + header)
-        print("  " + "-" * len(header))
-        best_path = candidates[0][2]
-        for rscore, sc, p, _, _ in sorted(candidates, key=lambda x: x[2].name):
-            marker = " ← best" if p == best_path else ""
-            print(
-                f"  {p.name:<45}  "
-                f"{fmt(sc['si']):>9}  "
-                f"{fmt(sc['err_ul_mean']):>9}  "
-                f"{fmt(sc['err_ul_median']):>9}  "
-                f"{rscore:.3e}"
-                f"{marker}"
-            )
-        print(f"\n  → to load manually: load_grape_run('{best_path}')")
 
-    for rank_score, scores, path, meta, data in candidates:
-        result = _build_result(path, data, scores, meta, rank_by, rank_score)
-        if result is None:
-            if verbose:
-                print(f"  [skip] {path.name} has no final_amps")
-            continue
-        return result
+    run_id, _, data = source_run
+    method = f"W{source}"
+    label  = (
+        f"{method}_p{num_tslots}_det{detuning:.2f}_err{drive_error:.2f}"
+        f"-lam{lam:.4f}-{run_id}"
+    )
+
+    # repack
+    numeric_angles = [a for a in angles if isinstance(a, (int, float))]
+    numeric_json   = [l for l in data.get("state_labels", []) if isinstance(l, (int, float))]
+    amps_joint     = _repack_from_data(data["final_amps"], numeric_json, numeric_angles)
+
+    # pad dummy states with zeros if needed
+    # nvcenter_system(K_full) expects (num_tslots, K_full*2) controls
+    # but source runs only have K_numeric states
+    K_full    = len(angles)
+    K_numeric = len(numeric_angles)
+    if K_full > K_numeric:
+        n_dummy = K_full - K_numeric
+        zeros   = np.zeros((amps_joint.shape[0], n_dummy))
+        half    = amps_joint.shape[1] // 2   # K_numeric
+        # grouped order: [x0..xK, x_dummy.., y0..yK, y_dummy..]
+        amps_joint = np.hstack([
+            amps_joint[:, :half], zeros,
+            amps_joint[:, half:], zeros,
+        ])
+        print(f"[{method}] padded {n_dummy} dummy state(s) -> {amps_joint.shape}")
+
+    print(f"[{method}] id={run_id}  amps_joint={amps_joint.shape}")
+
+    # run
+    vRho_init, vRho_target, U_big = pack_subspace_states(
+        rotations=unitary_rotations,
+        rho_init=rho_init,
+    )
+
+    s_time = time.time()
+    result = run_grape_si(
+        vRho_init, vRho_target, U_big,
+        lam=lam, config=cfg, amps=amps_joint,
+    )
+    e_time = time.time()
+
+    pr = PulseResult(
+        config       = cfg,
+        mode         = "GRAPE_AVG",
+        result       = result,
+        rho_targets  = rho_targets,
+        final_amps   = result.final_amps,
+        label        = label,
+        state_labels = angles,
+        run_time     = e_time - s_time,
+    )
 
     if verbose:
-        print("[find_best_grape_run] No candidate with valid final_amps — returning None.")
-    return None
+        pr.display()
+
+    save_dir.mkdir(parents=True, exist_ok=True)
+    pr.save(save_dir / f"{label}.json")
+    print(f"Saved → {save_dir / f'{label}.json'}")
+
+    return pr
+
+
+# ── CLI ───────────────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Warm-start GRAPE_AVG from existing GRAPE or CRAB runs",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument("-s",   "--source",         type=str,   default="GRAPE",
+                        choices=["GRAPE", "CRAB"],  help="Source method for warm start")
+    parser.add_argument("-p",   "--num_tslots",     type=int,   default=40)
+    parser.add_argument("-det", "--detuning",       type=float, default=0.0)
+    parser.add_argument("-dum", "--dummy",          action="store_true", default=False)
+    parser.add_argument("-e",   "--drive_error",    type=float, default=0.0)
+    parser.add_argument("-i",   "--identification", type=int,   default=1)
+    parser.add_argument("-n",   "--num_experiment", type=int,   default=0,
+                        help="Loop over ids 1..n (same as run_sampling_data -n)")
+    parser.add_argument("-l",   "--lam",            type=float, default=0.05)
+    parser.add_argument("-v",   "--verbose",        action="store_true")
+    args = parser.parse_args()
+
+    if args.num_experiment > 0:
+        for i in range(1, args.num_experiment + 1):
+            run_experiment(
+                source         = args.source,
+                num_tslots     = args.num_tslots,
+                detuning       = args.detuning,
+                dummy          = args.dummy,
+                drive_error    = args.drive_error,
+                identification = i,
+                lam            = args.lam,
+                verbose        = args.verbose,
+            )
+    else:
+        run_experiment(
+            source         = args.source,
+            num_tslots     = args.num_tslots,
+            detuning       = args.detuning,
+            dummy          = args.dummy,
+            drive_error    = args.drive_error,
+            identification = args.identification,
+            lam            = args.lam,
+            verbose        = args.verbose,
+        )
