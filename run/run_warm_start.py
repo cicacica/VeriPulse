@@ -275,6 +275,23 @@ def run_experiment(
     numeric_angles = [a for a in angles if isinstance(a, (int, float))]
     numeric_json   = [l for l in data.get("state_labels", []) if isinstance(l, (int, float))]
     amps_joint     = _repack_from_data(data["final_amps"], numeric_json, numeric_angles)
+
+    # pad dummy states with zeros if needed
+    # nvcenter_system(K_full) expects (num_tslots, K_full*2) controls
+    # but source runs only have K_numeric states
+    K_full    = len(angles)
+    K_numeric = len(numeric_angles)
+    if K_full > K_numeric:
+        n_dummy = K_full - K_numeric
+        zeros   = np.zeros((amps_joint.shape[0], n_dummy))
+        half    = amps_joint.shape[1] // 2   # K_numeric
+        # grouped order: [x0..xK, x_dummy.., y0..yK, y_dummy..]
+        amps_joint = np.hstack([
+            amps_joint[:, :half], zeros,
+            amps_joint[:, half:], zeros,
+        ])
+        print(f"[{method}] padded {n_dummy} dummy state(s) -> {amps_joint.shape}")
+
     print(f"[{method}] id={run_id}  amps_joint={amps_joint.shape}")
 
     # run
