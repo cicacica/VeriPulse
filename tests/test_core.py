@@ -29,7 +29,7 @@ def test_sdp():
     print("estimate secret independence by testing SDP from tomography result ... ")
     # tomography result
     rho_ests = []
-    with open("data/dummyless/rhoEsti1.json") as f:
+    with open("data/rhoEsti1.json") as f:
         experiment_tomography = json.load(f)
     for d in experiment_tomography:
         raw = np.array(list(d.values())[0])  # shape should be (2,2,2)
