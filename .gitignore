@@ -37,3 +37,5 @@ logs
 Thumbs.db
 
 uv.lock
+*.stderr
+*.stdout

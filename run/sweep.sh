@@ -9,11 +9,11 @@ export PATH="$HOME/.local/bin:$PATH"
 
 cd "$(dirname "$0")"
 
-#DET="$1"
-#ERR="$2"
-LAM="$1"
+DET="$1"
+ERR="$2"
+#LAM="$1"
 
-#uv run python -u run_sampling_data.py -p 40 -m GRAPE_AVG -l 0.05 -det $DET -e $ERR -n 5
+uv run python -u run_sampling_data.py -p 40 -m GRAPE_AVG -dum -l 0.026 -det $DET -e $ERR -n 5
 #uv run python -u run_sampling_data.py -p 40 -m CRAB -dum -l 0.026 -det $DET -e $ERR -n 5
 #uv run python -u run_sampling_data.py -p 40 -m GRAPE -dum -det $DET -e $ERR -n 5
-uv run python -u run_warm_start.py -s GRAPE -p 40 -l $LAM -dum -n 5
+#uv run python -u run_warm_start.py -s GRAPE -p 40 -l $LAM -dum -n 5
