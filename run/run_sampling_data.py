@@ -22,7 +22,7 @@ def run_experiment(
         detuning=detuning,
         drive_error=drive_error,
         max_iter=20000, # (int) Cap of iterations
-        max_wall_time=100000,  #(s) Cap of compute time
+        max_wall_time=200000,  #(s) Cap of compute time
         fid_err_targ=1e-10
     )
     
