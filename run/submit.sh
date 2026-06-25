@@ -9,7 +9,7 @@ cd "$(dirname "$0")"
 # Core 3x3 grid: CRAB/GRAPE/GRAPE_AVG
 for D in 0.05 0.10 0.2; do
   for err in 0.05 0.1; do
-    oarsub -l /nodes=1/core=64,walltime=150:0:0 -p "host like 'tall%'" -n "no dummy avg" \
+    oarsub -l /nodes=1/core=64,walltime=40:0:0 -p "host like 'tall%'" -n "dummy 5" \
            "$(pwd)/sweep.sh $D $err"
   done
 done
