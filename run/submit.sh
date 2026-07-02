@@ -7,13 +7,37 @@ cd "$(dirname "$0")"
 # err 0.05, 0.1
 #
 # Core 3x3 grid: CRAB/GRAPE/GRAPE_AVG
-for D in 0.05 0.10 0.2; do
-  for err in 0.05 0.1; do
-    oarsub -l /nodes=1/core=64,walltime=40:0:0 -p "host like 'tall%'" -n "dummy 5" \
-           "$(pwd)/sweep.sh $D $err"
-  done
-done
+#for D in 0.05 0.10 0.2; do
+#  for err in 0.05 0.1; do
+#    oarsub -l /nodes=1/core=64,walltime=200:0:0 -p "host like 'tall%'" -n "dummy 5" \
+#           "$(pwd)/sweep.sh $D $err"
+#  done
+#done
 
+
+oarsub -l /nodes=1/core=64,walltime=60:0:0 -p "host like 'tall%'" -n "dummy d0 e0.1 i4" \
+      "$(pwd)/sweep.sh 0.0 0.1"
+
+oarsub -l /nodes=1/core=64,walltime=60:0:0 -p "host like 'tall%'" -n "dummy d0.05 e0.0 i4" \
+      "$(pwd)/sweep.sh 0.05 0.0"
+
+oarsub -l /nodes=1/core=64,walltime=60:0:0 -p "host like 'tall%'" -n "dummy d0.2 e0.0 i4" \
+      "$(pwd)/sweep.sh 0.2 0.0"
+
+oarsub -l /nodes=1/core=64,walltime=60:0:0 -p "host like 'tall%'" -n "dummy d0.05 e0.1 i4" \
+      "$(pwd)/sweep.sh 0.05 0.1"
+
+oarsub -l /nodes=1/core=64,walltime=60:0:0 -p "host like 'tall%'" -n "dummy d0.1 e0.05 i4" \
+      "$(pwd)/sweep.sh 0.1 0.05"
+
+oarsub -l /nodes=1/core=64,walltime=60:0:0 -p "host like 'tall%'" -n "dummy d0.1 e0.1 i4" \
+      "$(pwd)/sweep.sh 0.1 0.1"
+
+oarsub -l /nodes=1/core=64,walltime=60:0:0 -p "host like 'tall%'" -n "dummy d0.2 e0.05 i4" \
+      "$(pwd)/sweep.sh 0.2 0.05"
+
+oarsub -l /nodes=1/core=64,walltime=60:0:0 -p "host like 'tall%'" -n "dummy d0.2 e0.1 i4" \
+      "$(pwd)/sweep.sh 0.2 0.1"
 
 
 # Stress test

@@ -36,6 +36,6 @@ logs
 .DS_Store
 Thumbs.db
 
-uv.lock
+*.lock
 *.stderr
 *.stdout
