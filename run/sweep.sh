@@ -14,7 +14,7 @@ ERR="$2"
 #LAM="$1"
 
 #uv run python -u run_sampling_data.py -p 40 -m GRAPE_AVG -l 0.05 -det $DET -e $ERR -n 5
-uv run python -u run_sampling_data.py -p 40 -m GRAPE_AVG -l 0.026 -dum -det $DET -e $ERR -i 4
+uv run python -u run_sampling_data.py -p 40 -m GRAPE_AVG -l 0.026 -dum -det $DET -e $ERR -i 3
 #uv run python -u run_sampling_data.py -p 40 -m CRAB -dum -l 0.026 -det $DET -e $ERR -n 5
 #uv run python -u run_sampling_data.py -p 40 -m GRAPE -dum -det $DET -e $ERR -n 5
 #uv run python -u run_warm_start.py -s GRAPE -p 40 -l $LAM -dum -n 5
