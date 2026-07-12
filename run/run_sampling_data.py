@@ -36,13 +36,10 @@ def run_experiment(
     
     # with dummy 
     if dummy == True : 
-        save_dir = Path.cwd().parent/"data/dummyyes"
-        angles.append("+")
-        angles.append("-")
-        rho_targets.append(Qobj([[0.5, 0.5],[0.5, 0.5]])) # |+>
-        rho_targets.append(Qobj([[0.5, -0.5],[-0.5, 0.5]])) # |->
-        unitary_rotations.append(hadamard())
-        unitary_rotations.append(hadamardZ())
+        save_dir = Path.cwd().parent/"data/dummy"
+        angles = ["+", "-"]
+        rho_targets = [Qobj([[0.5, 0.5],[0.5, 0.5]]), Qobj([[0.5, -0.5],[-0.5, 0.5]]) ]
+        unitary_rotations = [hadamard(), hadamardZ()]
     else: 
         save_dir = Path.cwd().parent/"data/dummyless" 
  
