@@ -113,7 +113,7 @@ def nvcenter_system(K: int, cfg: PulseConfig):
         Hc_y = [2 * pi * cfg.omega_drift * (1 + cfg.drive_error) * sy for sy in Sy]
 
     # Liouvillians
-    L_drift = liouvillian(H_drift, [np.sqrt(1 / cfg.T2_star) * Sz])
+    L_drift = liouvillian(H_drift, [np.sqrt(2 / cfg.T2_star) * Sz])
 
     if K == 1:
         L_ctrl = [liouvillian(Hc_x, []), liouvillian(Hc_y, [])]

@@ -8,13 +8,14 @@
 #
 #nohup
 bash -c '
-uv run python -u run_sampling_data.py -dum -p 40 -m "GRAPE_AVG" -l 0.005 -n 5 &> logs/grape_avg.log &&  
-uv run python -u run_sampling_data.py -dum -p 40 -m "GRAPE_AVG" -l 0.01 -n 5 &> logs/grape_avg.log &&  
-uv run python -u run_sampling_data.py -dum -p 40 -m "GRAPE_AVG" -l 0.025 -n 5 &> logs/grape_avg.log &&  
-uv run python -u run_sampling_data.py -dum -p 40 -m "GRAPE_AVG" -l 0.04 -n 5 &> logs/grape_avg.log &&  
-uv run python -u run_sampling_data.py -dum -p 40 -m "GRAPE_AVG" -l 0.05 -n 5 &> logs/grape_avg.log &&  
-uv run python -u run_sampling_data.py -dum -p 40 -m "GRAPE_AVG" -l 0.06 -n 5 &> logs/grape_avg.log &&  
-uv run python -u run_sampling_data.py -dum -p 40 -m "GRAPE_AVG" -l 0.1 -n 5 &> logs/grape_avg.log &&  
-uv run python -u run_sampling_data.py -dum -p 40 -m "GRAPE_AVG" -l 0.5 -n 5 &> logs/grape_avg.log  
- '  
- #&> logs/batch1.log &
+uv run python run_warm_start.py -s GRAPE -p 30 -det 0.0 -e 0.0 -n 5 -l 0.05 &> logs/wgrape.log &&  
+uv run python run_warm_start.py -s CRAB -p 30  -det 0.0 -e 0.0 -n 5 -l 0.05 &> logs/wgrape.log &&  
+uv run python run_warm_start.py -s GRAPE -p 50  -det 0.0 -e 0.0 -n 5 -l 0.05 &> logs/wgrape.log &&  
+uv run python run_warm_start.py -s CRAB -p 50  -det 0.0 -e 0.0 -n 5 -l 0.05 &> logs/wgrape.log &&  
+uv run python run_warm_start.py -s GRAPE -p 60  -det 0.0 -e 0.0 -n 5 -l 0.05 &> logs/wgrape.log &&  
+uv run python run_warm_start.py -s CRAB -p 60  -det 0.0 -e 0.0 -n 5 -l 0.05 &> logs/wgrape.log &&  
+uv run python run_warm_start.py -s GRAPE -p 70  -det 0.0 -e 0.0 -n 5 -l 0.05 &> logs/wgrape.log &&  
+uv run python run_warm_start.py -s CRAB -p 70  -det 0.0 -e 0.0 -n 5 -l 0.05 &> logs/wgrape.log &&  
+uv run python run_warm_start.py -s GRAPE -p 80  -det 0.0 -e 0.0 -n 5 -l 0.05 &> logs/wgrape.log &&  
+uv run python run_warm_start.py -s CRAB -p 80 -det 0.0 -e 0.0 -n 5 -l 0.05 &> logs/wgrape.log  
+'&> logs/batch1.log &
